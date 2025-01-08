@@ -7,4 +7,98 @@
 
 \f0\fs24 \cf0 asd}
 
-am modificat
+db.collection.aggregate([
+  {
+    $addFields: {
+      rawLength: { $strLenCP: "$rawText" }
+    }
+  },
+  {
+    $group: {
+      _id: null,
+      avgRawLength: { $avg: "$rawLength" }
+    }
+  },
+  {
+    $lookup: {
+      from: "collection",
+      pipeline: [
+        {
+          $addFields: {
+            rawLength: { $strLenCP: "$rawText" }
+          }
+        },
+        {
+          $match: {
+            namedEntities: { $exists: true, $ne: [] }
+          }
+        },
+        {
+          $project: {
+            rawText: 1,
+            cleanText: 1,
+            namedEntities: 1,
+            hashtags: 1,
+            rawLength: 1
+          }
+        }
+      ],
+      as: "filteredDocs"
+    }
+  },
+  {
+    $unwind: "$filteredDocs"
+  },
+  {
+    $match: {
+      "filteredDocs.rawLength": { $gt: "$avgRawLength" }
+    }
+  },
+  {
+    $addFields: {
+      cleanLength: { $strLenCP: "$filteredDocs.cleanText" },
+      eliminatedCount: {
+        $subtract: ["$filteredDocs.rawLength", { $strLenCP: "$filteredDocs.cleanText" }]
+      }
+    }
+  },
+  {
+    $match: {
+      eliminatedCount: { $gte: 2 }
+    }
+  },
+  {
+    $unwind: "$filteredDocs.namedEntities"
+  },
+  {
+    $group: {
+      _id: null,
+      namedEntitiesCount: { $sum: 1 },
+      hashtagsCount: { $sum: { $size: "$filteredDocs.hashtags" } },
+      mostFrequentEntity: {
+        $push: "$filteredDocs.namedEntities.entity"
+      },
+      mostFrequentHashtag: {
+        $push: "$filteredDocs.hashtags"
+      }
+    }
+  },
+  {
+    $project: {
+      namedEntitiesVsHashtags: {
+        $concat: [
+          { $toString: "$namedEntitiesCount" },
+          " namedEntities VS ",
+          { $toString: "$hashtagsCount" },
+          " hashtags"
+        ]
+      },
+      mostFrequentNamedEntity: {
+        $arrayElemAt: ["$mostFrequentEntity", 0]
+      },
+      mostFrequentHashtag: {
+        $arrayElemAt: ["$mostFrequentHashtag", 0]
+      }
+    }
+  }
+])
